@@ -4,9 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>Älgjakt</title>
+    <title>JaktApp</title>
 
-    <!-- Leaflet CSS -->
     <link
         rel="stylesheet"
         href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
@@ -16,6 +15,7 @@
         html, body {
             height: 100%;
             margin: 0;
+            font-family: Arial, sans-serif;
         }
 
         #map {
@@ -23,154 +23,445 @@
             width: 100%;
         }
 
+        /* GPS-information */
         #status {
             position: absolute;
-            top: 10px;
-            left: 10px;
+            top: 12px;
+            left: 50%;
+            transform: translateX(-50%);
             z-index: 1000;
 
-            background: white;
-            padding: 10px 14px;
-            border-radius: 8px;
+            background: rgba(255,255,255,0.95);
+            padding: 10px 16px;
+            border-radius: 10px;
 
-            font-family: sans-serif;
             font-size: 14px;
+            line-height: 1.45;
 
-            box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+            min-width: 160px;
         }
+
+        #status-title {
+            font-weight: bold;
+            margin-bottom: 3px;
+        }
+
+        /* Knapp för att centrera kartan */
+        #centerButton {
+            position: absolute;
+            right: 15px;
+            bottom: 25px;
+            z-index: 1000;
+
+            width: 52px;
+            height: 52px;
+
+            border: none;
+            border-radius: 50%;
+
+            background: white;
+            font-size: 25px;
+
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+            cursor: pointer;
+        }
+
+        #centerButton:active {
+            background: #eeeeee;
+        }
+
+        /* Vår egen positionsmarkör */
+        .hunter-marker {
+            width: 18px;
+            height: 18px;
+
+            background: #1976d2;
+            border: 3px solid white;
+            border-radius: 50%;
+
+            box-shadow: 0 1px 5px rgba(0,0,0,0.6);
+        }
+
+        /* Namnet under punkten */
+        .hunter-name {
+            background: rgba(255,255,255,0.9);
+            border-radius: 4px;
+            padding: 2px 5px;
+
+            font-size: 12px;
+            font-weight: bold;
+
+            white-space: nowrap;
+
+            box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+        }
+
     </style>
 </head>
 
 <body>
 
     <div id="status">
-        Hämtar GPS-position...
+        <div id="status-title">📍 Söker GPS...</div>
+        <div id="accuracy">Noggrannhet: --</div>
+        <div id="speed">Hastighet: --</div>
+        <div id="lastUpdate">Senast: --</div>
     </div>
 
     <div id="map"></div>
 
-    <!-- Leaflet JavaScript -->
+    <button id="centerButton" title="Centrera på min position">
+        ◎
+    </button>
+
+
     <script
         src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">
     </script>
 
+
     <script>
 
-        // Skapa kartan
-        const map = L.map('map').setView([62.39, 17.31], 10);
+        // ------------------------------------------------
+        // INSTÄLLNINGAR
+        // ------------------------------------------------
 
-        // Lägg till OpenStreetMap-kartor
-		L.tileLayer(
-			'https://tile.openstreetmap.de/{z}/{x}/{y}.png',
-			{
-				attribution: '&copy; OpenStreetMap contributors'
-			}
-		).addTo(map);
+        const USER_NAME = "Mattias";
 
 
-        // Variabel för vår positionsmarkör
+
+        // ------------------------------------------------
+        // KARTA
+        // ------------------------------------------------
+
+        const map = L.map('map').setView(
+            [62.39, 17.31],
+            10
+        );
+
+
+        L.tileLayer(
+            'https://tile.openstreetmap.de/{z}/{x}/{y}.png',
+            {
+                maxZoom: 19,
+                attribution: '&copy; OpenStreetMap contributors'
+            }
+        ).addTo(map);
+
+
+
+        // ------------------------------------------------
+        // VARIABLER
+        // ------------------------------------------------
+
         let positionMarker = null;
+        let accuracyCircle = null;
+
+        let currentLatitude = null;
+        let currentLongitude = null;
+
+        let firstPosition = true;
 
 
-        // Funktion som körs när GPS-position erhålls
+
+        // ------------------------------------------------
+        // SKAPA EGEN MARKÖR
+        // ------------------------------------------------
+
+        const hunterIcon = L.divIcon({
+
+            className: '',
+
+            html:
+                '<div class="hunter-marker"></div>',
+
+            iconSize: [24, 24],
+
+            iconAnchor: [12, 12]
+        });
+
+
+
+        // ------------------------------------------------
+        // GPS-POSITION MOTTAGEN
+        // ------------------------------------------------
+
         function positionReceived(position) {
 
-            const latitude = position.coords.latitude;
-            const longitude = position.coords.longitude;
-            const accuracy = position.coords.accuracy;
+            const latitude =
+                position.coords.latitude;
+
+            const longitude =
+                position.coords.longitude;
+
+            const accuracy =
+                position.coords.accuracy;
+
+            const speed =
+                position.coords.speed;
 
 
-            console.log("Latitude:", latitude);
-            console.log("Longitude:", longitude);
-            console.log("Noggrannhet:", accuracy);
+            currentLatitude = latitude;
+            currentLongitude = longitude;
 
 
-            // Om vi inte har någon markör ännu
+
+            // --------------------------------------------
+            // Skapa eller flytta markören
+            // --------------------------------------------
+
             if (positionMarker === null) {
 
-                positionMarker = L.marker([
-                    latitude,
-                    longitude
-                ]).addTo(map);
+                positionMarker = L.marker(
+                    [latitude, longitude],
+                    {
+                        icon: hunterIcon
+                    }
+                ).addTo(map);
 
-                positionMarker.bindPopup(
-                    "Du är här"
+
+                positionMarker.bindTooltip(
+                    USER_NAME,
+                    {
+                        permanent: true,
+                        direction: "bottom",
+                        offset: [0, 14],
+                        className: "hunter-name"
+                    }
                 );
+
 
             } else {
 
-                // Flytta befintlig markör
-                positionMarker.setLatLng([
-                    latitude,
-                    longitude
-                ]);
+                positionMarker.setLatLng(
+                    [latitude, longitude]
+                );
             }
 
 
-            // Flytta kartan till positionen
-            map.setView([
-                latitude,
-                longitude
-            ], 16);
+
+            // --------------------------------------------
+            // GPS-noggrannhetscirkel
+            // --------------------------------------------
+
+            if (accuracyCircle === null) {
+
+                accuracyCircle = L.circle(
+                    [latitude, longitude],
+                    {
+                        radius: accuracy,
+                        weight: 1,
+                        fillOpacity: 0.12
+                    }
+                ).addTo(map);
+
+            } else {
+
+                accuracyCircle.setLatLng(
+                    [latitude, longitude]
+                );
+
+                accuracyCircle.setRadius(
+                    accuracy
+                );
+            }
 
 
-            // Visa information
-            document.getElementById("status").innerHTML =
-                "GPS OK<br>" +
-                "Noggrannhet: " +
+
+            // --------------------------------------------
+            // Centrera endast första gången
+            // --------------------------------------------
+
+            if (firstPosition) {
+
+                map.setView(
+                    [latitude, longitude],
+                    17
+                );
+
+                firstPosition = false;
+            }
+
+
+
+            // --------------------------------------------
+            // Uppdatera informationsruta
+            // --------------------------------------------
+
+            document.getElementById(
+                "status-title"
+            ).innerHTML =
+                "📍 GPS aktiv";
+
+
+            document.getElementById(
+                "accuracy"
+            ).innerHTML =
+                "Noggrannhet: ±" +
                 Math.round(accuracy) +
-                " meter";
+                " m";
+
+
+
+            // --------------------------------------------
+            // Hastighet
+            // --------------------------------------------
+
+            if (speed !== null && speed >= 0) {
+
+                const speedKmh =
+                    speed * 3.6;
+
+                document.getElementById(
+                    "speed"
+                ).innerHTML =
+                    "Hastighet: " +
+                    speedKmh.toFixed(1) +
+                    " km/h";
+
+            } else {
+
+                document.getElementById(
+                    "speed"
+                ).innerHTML =
+                    "Hastighet: --";
+            }
+
+
+
+            // --------------------------------------------
+            // Tid för senaste GPS-position
+            // --------------------------------------------
+
+            const now = new Date();
+
+            const timeString =
+                now.toLocaleTimeString(
+                    "sv-SE"
+                );
+
+
+            document.getElementById(
+                "lastUpdate"
+            ).innerHTML =
+                "Senast: " +
+                timeString;
         }
 
 
-        // Funktion om GPS misslyckas
-		function positionError(error) {
-		
-			console.error(error);
-		
-			let message = "";
-		
-			switch(error.code) {
-		
-				case error.PERMISSION_DENIED:
-					message = "Åtkomst till GPS nekades";
-					break;
-		
-				case error.POSITION_UNAVAILABLE:
-					message = "GPS-position är inte tillgänglig";
-					break;
-		
-				case error.TIMEOUT:
-					message = "GPS tog för lång tid att svara";
-					break;
-		
-				default:
-					message = "Okänt GPS-fel";
-			}
-		
-			document.getElementById("status").innerHTML =
-				"GPS-FEL<br>" + message;
-		}
+
+        // ------------------------------------------------
+        // GPS-FEL
+        // ------------------------------------------------
+
+        function positionError(error) {
+
+            console.error(error);
+
+            let message = "";
+
+            switch(error.code) {
+
+                case error.PERMISSION_DENIED:
+
+                    message =
+                        "GPS-behörighet nekades";
+
+                    break;
 
 
-        // Starta GPS
+                case error.POSITION_UNAVAILABLE:
+
+                    message =
+                        "GPS-position saknas";
+
+                    break;
+
+
+                case error.TIMEOUT:
+
+                    message =
+                        "GPS tog för lång tid";
+
+                    break;
+
+
+                default:
+
+                    message =
+                        "Okänt GPS-fel";
+            }
+
+
+            document.getElementById(
+                "status-title"
+            ).innerHTML =
+                "⚠️ GPS-fel";
+
+
+            document.getElementById(
+                "accuracy"
+            ).innerHTML =
+                message;
+        }
+
+
+
+        // ------------------------------------------------
+        // STARTA GPS
+        // ------------------------------------------------
+
         if ("geolocation" in navigator) {
 
             navigator.geolocation.watchPosition(
+
                 positionReceived,
+
                 positionError,
+
                 {
                     enableHighAccuracy: true,
-                    maximumAge: 5000,
-                    timeout: 10000
+                    maximumAge: 2000,
+                    timeout: 15000
                 }
             );
 
         } else {
 
-            document.getElementById("status").innerHTML =
-                "Den här webbläsaren stödjer inte GPS";
+            document.getElementById(
+                "status-title"
+            ).innerHTML =
+                "GPS stöds inte";
         }
+
+
+
+        // ------------------------------------------------
+        // CENTRERA-KNAPP
+        // ------------------------------------------------
+
+        document.getElementById(
+            "centerButton"
+        ).addEventListener(
+            "click",
+            function() {
+
+                if (
+                    currentLatitude !== null &&
+                    currentLongitude !== null
+                ) {
+
+                    map.setView(
+                        [
+                            currentLatitude,
+                            currentLongitude
+                        ],
+                        17
+                    );
+                }
+            }
+        );
 
     </script>
 
