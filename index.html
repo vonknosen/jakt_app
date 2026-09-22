@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Älgjakt</title>
+
+    <!-- Leaflet CSS -->
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+        }
+
+        #map {
+            height: 100%;
+            width: 100%;
+        }
+
+        #status {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+
+            background: white;
+            padding: 10px 14px;
+            border-radius: 8px;
+
+            font-family: sans-serif;
+            font-size: 14px;
+
+            box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="status">
+        Hämtar GPS-position...
+    </div>
+
+    <div id="map"></div>
+
+    <!-- Leaflet JavaScript -->
+    <script
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">
+    </script>
+
+    <script>
+
+        // Skapa kartan
+        const map = L.map('map').setView([62.39, 17.31], 10);
+
+        // Lägg till OpenStreetMap-kartor
+		L.tileLayer(
+			'https://tile.openstreetmap.de/{z}/{x}/{y}.png',
+			{
+				attribution: '&copy; OpenStreetMap contributors'
+			}
+		).addTo(map);
+
+
+        // Variabel för vår positionsmarkör
+        let positionMarker = null;
+
+
+        // Funktion som körs när GPS-position erhålls
+        function positionReceived(position) {
+
+            const latitude = position.coords.latitude;
+            const longitude = position.coords.longitude;
+            const accuracy = position.coords.accuracy;
+
+
+            console.log("Latitude:", latitude);
+            console.log("Longitude:", longitude);
+            console.log("Noggrannhet:", accuracy);
+
+
+            // Om vi inte har någon markör ännu
+            if (positionMarker === null) {
+
+                positionMarker = L.marker([
+                    latitude,
+                    longitude
+                ]).addTo(map);
+
+                positionMarker.bindPopup(
+                    "Du är här"
+                );
+
+            } else {
+
+                // Flytta befintlig markör
+                positionMarker.setLatLng([
+                    latitude,
+                    longitude
+                ]);
+            }
+
+
+            // Flytta kartan till positionen
+            map.setView([
+                latitude,
+                longitude
+            ], 16);
+
+
+            // Visa information
+            document.getElementById("status").innerHTML =
+                "GPS OK<br>" +
+                "Noggrannhet: " +
+                Math.round(accuracy) +
+                " meter";
+        }
+
+
+        // Funktion om GPS misslyckas
+		function positionError(error) {
+		
+			console.error(error);
+		
+			let message = "";
+		
+			switch(error.code) {
+		
+				case error.PERMISSION_DENIED:
+					message = "Åtkomst till GPS nekades";
+					break;
+		
+				case error.POSITION_UNAVAILABLE:
+					message = "GPS-position är inte tillgänglig";
+					break;
+		
+				case error.TIMEOUT:
+					message = "GPS tog för lång tid att svara";
+					break;
+		
+				default:
+					message = "Okänt GPS-fel";
+			}
+		
+			document.getElementById("status").innerHTML =
+				"GPS-FEL<br>" + message;
+		}
+
+
+        // Starta GPS
+        if ("geolocation" in navigator) {
+
+            navigator.geolocation.watchPosition(
+                positionReceived,
+                positionError,
+                {
+                    enableHighAccuracy: true,
+                    maximumAge: 5000,
+                    timeout: 10000
+                }
+            );
+
+        } else {
+
+            document.getElementById("status").innerHTML =
+                "Den här webbläsaren stödjer inte GPS";
+        }
+
+    </script>
+
+</body>
+</html>
