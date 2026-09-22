@@ -163,6 +163,8 @@
 
         let firstPosition = true;
 
+        let trackPoints = [];
+        let trackLine = null;
 
 
         // ------------------------------------------------
@@ -205,6 +207,31 @@
             currentLatitude = latitude;
             currentLongitude = longitude;
 
+            // ------------------------------------------------
+            // SPARA OCH RITA GPS-SPÅR
+            // ------------------------------------------------
+
+            trackPoints.push([
+                latitude,
+                longitude
+            ]);
+
+            if (trackLine === null) {
+
+                trackLine = L.polyline(
+                    trackPoints,
+                    {
+                        weight: 4,
+                        opacity: 0.8
+                    }
+                ).addTo(map);
+
+            } else {
+
+                trackLine.setLatLngs(
+                    trackPoints
+                );
+            }
 
 
             // --------------------------------------------
