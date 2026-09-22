@@ -107,6 +107,7 @@
         <div id="accuracy">Noggrannhet: --</div>
         <div id="speed">Hastighet: --</div>
         <div id="lastUpdate">Senast: --</div>
+        <div id="pointCount">GPS-punkter: 0</div>
     </div>
 
     <div id="map"></div>
@@ -233,6 +234,15 @@
                 );
             }
 
+            // ------------------------------------------------
+            // VISA ANTAL GPS-PUNKTER
+            // ------------------------------------------------
+
+            document.getElementById(
+                "pointCount"
+            ).innerHTML =
+                "GPS-punkter: " +
+                trackPoints.length;
 
             // --------------------------------------------
             // Skapa eller flytta markören
@@ -265,7 +275,6 @@
                     [latitude, longitude]
                 );
             }
-
 
 
             // --------------------------------------------
