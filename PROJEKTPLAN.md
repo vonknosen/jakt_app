@@ -81,7 +81,7 @@ Varje större etapp ska ge en fungerande, verifierad version som går att åters
 | 7. iOS och historik | Fullständiga iOS-flöden, distribution och vald historikfunktion. | Grundläggande jakt fungerar mellan Android och iPhone. |
 | 8. Hundpositioner | Utvärdera och anslut möjlig datakälla. | Utrustningens integration, rättigheter och kostnader är verifierade. |
 
-GitHub-repositoryt är klonat och originalprototypen finns i historiken. Dokumentationsarbetet inleder etapp 1; koduppdelning och Capacitor är ännu inte genomförda.
+Etapp 1: koduppdelningen är implementerad med Vite, TypeScript och npm-paketerad Leaflet 1.9.4. HTML, CSS, karta, positionsbevakning, spår i minnet och statusvisning har separata ansvar. Appens kod och Leaflet-resurser byggs till dist utan CDN-beroende; kartbilder kräver fortfarande nät. Typkontroll, produktionsbygge och grundläggande webbläsarbeteende med simulerad GPS har verifierats. Verklig telefon-GPS återstår att prova efter omstruktureringen. Originalprototypen finns i Git-historiken. Capacitor, bakgrunds-GPS, SQLite, Supabase och delning är ännu inte implementerade.
 
 ## Referenser för kommande teknikval
 
