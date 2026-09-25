@@ -1,3 +1,8 @@
 node_modules/
 dist/
 *.local
+
+# Lokala IDE-inställningar och privata signeringsnycklar
+.idea/
+*.jks
+*.keystore

@@ -6,13 +6,13 @@ Android utvecklas och testas först. iPhone/iOS ska stödjas senare. Kod ska del
 
 ## Status idag
 
-Appen är en webbprototyp med Vite, TypeScript och npm-paketerad Leaflet 1.9.4. Den visar karta, egen position, noggrannhetscirkel, hastighet, uppdateringstid och ett spår med punkträknare. GPS startar automatiskt. Kartan centreras vid första positionen och med centreringsknappen.
+Appen har en gemensam webbversion och en första Android-grund med Capacitor, Vite, TypeScript och npm-paketerad Leaflet 1.9.4. Den visar karta, egen position, noggrannhetscirkel, hastighet, uppdateringstid och ett spår med punkträknare. GPS startar automatiskt. Kartan centreras vid första positionen och med centreringsknappen.
 
 Leaflets kod och CSS ingår i bygget och laddas inte från CDN. Kartbilder hämtas fortfarande från tile.openstreetmap.de och kräver nätåtkomst.
 
-Positionering använder fortfarande webbläsarens watchPosition. Spåret finns endast i sidans minne och försvinner vid omladdning. Bakgrundsspårning, beständig lagring, synkronisering, användarkonton och delning är inte implementerade. Ingen filtrering av GPS-punkter har lagts till.
+Positionering använder webbläsarens watchPosition på webben och @capacitor/geolocation i mobilappen. Spåret finns endast i sidans minne och försvinner vid omladdning. Bakgrundsspårning, beständig lagring, synkronisering, användarkonton och delning är inte implementerade. Ingen filtrering av GPS-punkter har lagts till.
 
-Capacitor är nästa steg, men är inte installerat eller konfigurerat. Byggmappen dist är förberedd som framtida webbkatalog för Capacitor.
+Capacitor 8.5.2 är konfigurerat och Android-projektet finns i android/. Byggmappen dist används som webbkatalog.
 
 ## Köra projektet
 
@@ -42,7 +42,7 @@ Vid PowerShell-fel om blockerade skript kan npm.cmd användas i stället för np
 | npm run build | Kör typkontroll och bygger appen till dist. |
 | npm run preview | Visar senaste bygget lokalt; kör build först. |
 
-Webbläsarens GPS kräver platsbehörighet och en säker anslutning: localhost fungerar på datorn, men vanlig HTTP till datorns LAN-adress från telefonen räcker normalt inte. Ett senare telefontest behöver HTTPS eller den kommande mobilpaketeringen.
+Webbläsarens GPS kräver platsbehörighet och en säker anslutning: localhost fungerar på datorn, men vanlig HTTP till datorns LAN-adress från telefonen räcker normalt inte. GPS i telefonens webbläsare behöver HTTPS. Den installerade Android-appen använder i stället det native positioneringstillägget.
 
 ## Projektstruktur
 
@@ -54,7 +54,7 @@ Webbläsarens GPS kräver platsbehörighet och en säker anslutning: localhost f
 | src/styles.css | Appens utseende, flyttat från prototypen. |
 | src/types.ts | Gemensamma typer för koordinater och positionsdata. |
 | src/map.ts | Leaflet-karta, markör, noggrannhetscirkel, spårlinje och centrering. |
-| src/location.ts | Webbläsarens positionsbevakning och GPS-fel. |
+| src/location.ts | Positionsbevakning och GPS-fel för webbläsare och Capacitor. |
 | src/track.ts | Spårpunkter i tillfälligt minne. |
 | src/status.ts | Informationsrutans texter och värden. |
 | package.json | Kommandon, versionskrav och beroenden. |
@@ -75,6 +75,79 @@ Kontrollerat med Node.js 24.19.0 och npm 12.1.0. I Codex användes den medfölja
 - Kartbilder laddades och appen hämtade ingen Leaflet-kod från CDN.
 
 Detta ersätter inte provning av verklig GPS på telefon eller framtida tester av bakgrundspositionering och batteritid.
+
+
+## Android med Capacitor
+
+Den första Android-grunden använder Capacitor 8.5.2 och @capacitor/geolocation 8.2.2. Appnamnet är JaktApp, app-ID är se.jaktlaget.app och webDir är dist. Ingen server.url används: appens webbfiler paketeras lokalt och kräver inte att Vite eller datorn är igång. Kartbilder kräver fortfarande internet.
+
+location.ts väljer webbläsarens befintliga watchPosition på webben och Capacitors officiella positionering i mobilappen. Gränssnittet mot övrig appkod är oförändrat. Android ber om vanlig platsbehörighet; ungefärlig position accepteras också. Detta är inte bakgrunds-GPS och spåret försvinner när webbappen laddas om eller processen avslutas.
+
+De befintliga GPS-inställningarna återanvänds. På Android behålls preliminärt interval: 2000 och minimumUpdateInterval: 1000 (millisekunder) efter utomhustest på OnePlus 9 Pro. Tidigare användes indirekt 15 sekunders önskat intervall och 5 sekunders minimiintervall. Övriga GPS-inställningar är oförändrade. Webbläsaren styr fortfarande själv sin uppdateringstakt. Projektägaren rapporterade omkring ±8 m noggrannhet under gång och ±5 m stillastående, en tydlig förbättring jämfört med föregående test. Detta är telefonens rapporterade noggrannhet, inte uppmätt verkligt positionsfel. Slutliga GPS-intervall ska bestämmas genom senare fälttester av noggrannhet, spårkvalitet och batteriförbrukning. Ingen batterioptimering för en hel jaktdag har införts.
+
+### Verktyg och bygge
+
+Verifierad verktygsmiljö för detta steg: Node.js 24.21.0, npm 11.19.0, Temurin JDK 21.0.12.1, Android SDK Platform 36 och Gradle 8.14.3. Projektet använder minSdk 24 och compileSdk/targetSdk 36. Gradle hämtade även Build-Tools 35.0.0 enligt Android-byggverktygets standardval; installerade Build-Tools 36.0.0 kan vara kvar.
+
+Android Studios Java 25 kan köra IDE:n men ska inte användas för projektets Gradle 8.14.3. Välj JDK 21 under File → Settings → Build, Execution, Deployment → Build Tools → Gradle → Gradle JDK. Använd JDK 21 även via JAVA_HOME i terminalen.
+
+Från repositoryts rot, med Node/npm i sökvägen:
+
+```powershell
+npm.cmd ci
+npm.cmd run typecheck
+npm.cmd run build
+npx.cmd cap sync android
+npx.cmd cap open android
+```
+
+Kör inte cap sync samtidigt som Android-bygget; synkroniseringen återskapar genererade filer. Efter ändringar av webbkoden behövs både build och sync innan en ny Android-installation.
+
+För bygge i PowerShell, kontrollera att JAVA_HOME pekar på din JDK 21-installation:
+
+```powershell
+$env:JAVA_HOME
+& "$env:JAVA_HOME\bin\java.exe" -version
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+.\android\gradlew.bat -p android --no-daemon assembleDebug
+```
+
+Debug-APK skapas i android/app/build/outputs/apk/debug/app-debug.apk. SDK-sökvägen kan även anges lokalt via Android Studio i android/local.properties; den filen ska inte versionshanteras.
+
+### Installera på Android-telefon via USB
+
+1. Öppna repositoryts android-mapp i Android Studio, inte den gamla fristående projektmappen.
+2. Välj JDK 21 som Gradle JDK och låt Gradle-synkroniseringen bli klar. Behåll projektets Gradle/Android-plugin-versioner om IDE:n erbjuder uppgradering.
+3. Aktivera utvecklaralternativ och USB-felsökning på telefonen.
+4. Anslut en USB-kabel med datastöd och godkänn datorns felsökningsnyckel på telefonen.
+5. Välj telefonen som körmål och app som körkonfiguration. Tryck Run.
+6. Tillåt platsåtkomst medan appen används. Välj exakt position för GPS-testet.
+7. Kontrollera kartan, markören, noggrannheten, spåret och centreringsknappen. Prova även nekad behörighet och avstängda platstjänster.
+8. Koppla ur USB och kontrollera att appen startar från sin ikon utan Vite. Telefonen behöver fortfarande nät för nya kartbilder.
+
+Om telefonen inte visas, kontrollera anslutningen med:
+
+```powershell
+& "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe" devices
+```
+
+Vid unauthorized behöver datorn godkännas på telefonen. Om listan är tom, kontrollera kabel och USB-läge samt eventuell tillverkarspecifik Windows-drivrutin. Debug-versionen kräver inget Google Play-konto.
+
+### Behörigheter och Git
+
+Appens källmanifest begär INTERNET samt ACCESS_COARSE_LOCATION och ACCESS_FINE_LOCATION. Ingen ACCESS_BACKGROUND_LOCATION eller foreground service har lagts till. Det färdiga APK-manifestet är kontrollerat: platsbehörigheterna är endast COARSE och FINE. Biblioteken lägger även till ACCESS_NETWORK_STATE och en intern signaturskyddad DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION. Ingen bakgrundsplatsbehörighet eller foreground service finns i byggmanifestet. Kontrollera detta igen vid beroendeuppdateringar.
+
+Versionshantera capacitor.config.ts, paketfilerna, appkoden och Android-projektets källkod, manifest, resurser och Gradle-wrapper (inklusive wrapper-JAR). De genererade Capacitor-Gradle-filer som mallen inte ignorerar följer också med i Git.
+
+Versionshantera inte node_modules, dist, Android-byggresultat/APK, Gradle-cache, local.properties, lokala IDE-inställningar, kopierade webbassets eller privata signeringsnycklar. Mallens ikon och startbild används tills vidare.
+
+### Kontroller och kvarvarande begränsningar
+
+TypeScript-kontroll, Vite-bygge, cap sync android och Gradle assembleDebug har passerat. En debug-APK har byggts med JDK 21. Gradle rapporterade icke blockerande varningar om flatDir och SDK XML-versioner. Webbläsarflödet har provats i Edge med simulerad GPS. Den gemensamma GPS-funktionen har även kontrollerats med simulerade native-anrop: exakt/ungefärlig/nekad behörighet, fel och avslut medan start fortfarande väntar.
+
+Projektägaren har installerat och testat Android-appen på OnePlus 9 Pro och bekräftat fungerande karta och vanlig GPS utomhus. Spårningen upphör när skärmen släcks, vilket är förväntat i detta steg. Längre fälttest av spårkvalitet och batteritid samt systematisk kontroll av layout och behörighetsfall på olika telefoner återstår. Ingen bakgrunds-GPS, SQLite, Supabase, kontohantering, positionsdelning eller iOS-projekt ingår i detta steg.
+
+npm audit rapporterar tre måttliga poster i utvecklingskedjan @capacitor/cli → xcode → uuid. De godkända paketversionerna har behållits utan audit fix --force. npm audit --omit=dev rapporterade noll sårbarheter vid kontrollen.
 
 ## Dokumentation och arbetssätt
 
