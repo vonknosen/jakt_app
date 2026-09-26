@@ -61,6 +61,10 @@ export function createMap() {
     center(position: LocationSample) {
       map.setView([position.latitude, position.longitude], POSITION_ZOOM);
     },
+    clear() {
+      marker?.remove(); accuracyCircle?.remove(); trackLine?.remove();
+      marker = null; accuracyCircle = null; trackLine = null; firstPosition = true;
+    },
     destroy() {
       map.remove();
     },

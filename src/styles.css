@@ -82,3 +82,17 @@ html, body {
 
     box-shadow: 0 1px 3px rgba(0,0,0,0.25);
 }
+
+/* Android-only PoC controls. Browser layout is unchanged. */
+#status.with-tracking-test {
+    width: min(320px, calc(100vw - 100px));
+    max-height: 52vh;
+    overflow-y: auto;
+    font-size: 13px;
+}
+#tracking-test { border-top: 1px solid #ccc; margin-top: 8px; padding-top: 8px; }
+.tracking-buttons { display: flex; gap: 8px; margin-bottom: 6px; }
+.tracking-buttons button { min-height: 44px; flex: 1; font: inherit; cursor: pointer; }
+#tracking-error { color: #a00000; }
+#tracking-test summary { cursor: pointer; padding: 6px 0; }
+#tracking-test small { display: block; margin-top: 6px; }

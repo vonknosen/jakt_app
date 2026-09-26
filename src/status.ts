@@ -14,15 +14,20 @@ export function createStatus() {
   const pointCount = requireElement('pointCount');
 
   return {
-    update(position: LocationSample, count: number) {
+    update(position: LocationSample, count: number, measuredAt?: number) {
       title.textContent = '📍 GPS aktiv';
       accuracy.textContent = `Noggrannhet: ±${Math.round(position.accuracy)} m`;
       speed.textContent = position.speed !== null && position.speed >= 0
         ? `Hastighet: ${(position.speed * 3.6).toFixed(1)} km/h`
         : 'Hastighet: --';
       // Behåll prototypens visning av mottagningstid.
-      lastUpdate.textContent = 'Senast: ' + new Date().toLocaleTimeString('sv-SE');
+      lastUpdate.textContent = (measuredAt === undefined ? 'Senast: ' : 'Mätt: ') + new Date(measuredAt ?? Date.now()).toLocaleTimeString('sv-SE');
       pointCount.textContent = 'GPS-punkter: ' + count;
+    },
+    tracking(message: string) { title.textContent = message; },
+    reset() {
+      accuracy.textContent = 'Noggrannhet: --'; speed.textContent = 'Hastighet: --';
+      lastUpdate.textContent = 'Mätt: --'; pointCount.textContent = 'GPS-punkter: 0';
     },
     error(message: string) {
       title.textContent = '⚠️ GPS-fel';
