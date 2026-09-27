@@ -6,11 +6,11 @@ Android utvecklas och testas först. iPhone/iOS ska stödjas senare. Kod ska del
 
 ## Status idag
 
-Appen har en gemensam webbversion och en första Android-grund med Capacitor, Vite, TypeScript och npm-paketerad Leaflet 1.9.4. Den visar karta, egen position, noggrannhetscirkel, hastighet, uppdateringstid och ett spår med punkträknare. I webbläsaren startar GPS automatiskt. Android använder nu en separat PoC med Starta test/Stoppa. Kartan centreras vid första positionen och med centreringsknappen.
+Appen har en gemensam webbversion och en första Android-grund med Capacitor, Vite, TypeScript och npm-paketerad Leaflet 1.9.4. Den visar karta, egen position, noggrannhetscirkel, hastighet, uppdateringstid och ett spår med punkträknare. I webbläsaren startar GPS automatiskt. Android använder nu en separat PoC med Starta nytt spår/Stoppa och spara samt en lista över sparade spår. Kartan centreras vid första positionen och med centreringsknappen.
 
 Leaflets kod och CSS ingår i bygget och laddas inte från CDN. Kartbilder hämtas fortfarande från tile.openstreetmap.de och kräver nätåtkomst.
 
-Positionering använder webbläsarens watchPosition på webben och en lokal Capacitor-plugin med Android foreground service i GPS-PoC:n. Webbspåret finns endast i sidans minne; Android-testspåret ligger i en native-minnesbuffert som kan återläsas efter att WebView pausats eller laddats om, så länge Android-processen lever. Beständig lagring, synkronisering, användarkonton och delning är inte implementerade. Ingen filtrering av GPS-punkter har lagts till.
+Positionering använder webbläsarens watchPosition på webben och en lokal Capacitor-plugin med Android foreground service i GPS-PoC:n. Webbspåret finns endast i sidans minne; Android-spåren sparas löpande i privat SQLite och kan återläsas efter WebView-omladdning eller processavslut. Synkronisering, användarkonton och delning är inte implementerade. Ingen filtrering av GPS-punkter har lagts till.
 
 Capacitor 8.5.2 är konfigurerat och Android-projektet finns i android/. Byggmappen dist används som webbkatalog.
 
@@ -145,7 +145,7 @@ Versionshantera inte node_modules, dist, Android-byggresultat/APK, Gradle-cache,
 
 TypeScript-kontroll, Vite-bygge, cap sync android och Gradle assembleDebug har passerat. En debug-APK har byggts med JDK 21. Gradle rapporterade icke blockerande varningar om flatDir och SDK XML-versioner. Webbläsarflödet har provats i Edge med simulerad GPS. Den gemensamma GPS-funktionen har även kontrollerats med simulerade native-anrop: exakt/ungefärlig/nekad behörighet, fel och avslut medan start fortfarande väntar.
 
-Projektägaren har installerat och testat Android-appen på OnePlus 9 Pro och bekräftat fungerande karta och vanlig GPS utomhus. Även foreground-service-PoC:n har nu godkänts av projektägaren efter ett cirka 11 minuter och 32 sekunder långt fälttest med låst telefon; resultatet dokumenteras nedan. Längre fälttest av spårkvalitet och batteritid samt systematisk kontroll av layout och behörighetsfall på olika telefoner återstår. Bakgrunds-GPS finns nu som en avgränsad PoC; SQLite, Supabase, kontohantering, positionsdelning och iOS-projekt ingår inte.
+Projektägaren har installerat och testat Android-appen på OnePlus 9 Pro och bekräftat fungerande karta och vanlig GPS utomhus. Även foreground-service-PoC:n har nu godkänts av projektägaren efter ett cirka 11 minuter och 32 sekunder långt fälttest med låst telefon; resultatet dokumenteras nedan. Längre fälttest av spårkvalitet och batteritid samt systematisk kontroll av layout och behörighetsfall på olika telefoner återstår. Bakgrunds-GPS är fälttestad. PoC:n för beständig lokal SQLite-lagring är också godkänd efter telefonprov med verifierad processdöd och återöppning av sparade spår. Supabase, kontohantering, positionsdelning och iOS-projekt ingår inte.
 
 npm audit rapporterar tre måttliga poster i utvecklingskedjan @capacitor/cli → xcode → uuid. De godkända paketversionerna har behållits utan audit fix --force. npm audit --omit=dev rapporterade noll sårbarheter vid kontrollen.
 
@@ -158,31 +158,80 @@ Detta repository, vonknosen/jakt_app, är projektets fortsatta utvecklingsgrund.
 
 Arbeta stegvis och använd Git för att kunna återställa fungerande versioner. Projektägaren är inte professionell programmerare. Förklara större tekniska beslut begripligt innan stora arkitekturförändringar genomförs.
 
-## PoC: Android-GPS med låst skärm
+## PoC: beständiga Android-spår
 
-Syftet är att verifiera GPS → lås skärmen → gå sicksack → öppna appen → läs tillbaka verkliga mellanliggande mätningar. Detta är inte färdig heldagsspårning.
+GPS → TrackingService → TrackingStore (en processgemensam, serialiserad arbetstråd) → TrackingDatabase/Android SQLite. Capacitor-pluginen läser data till TypeScript/Leaflet. JavaScript/WebView styr aldrig sparningen. Webbversionen behåller sin tidigare GPS och sitt minnesspår.
 
-- Lokal Java-plugin `TestTrackingPlugin` kopplar TypeScript till `TrackingService` och `TrackingStore`. Inget nytt npm-paket krävs. Appmodulen deklarerar Google Play Services Location 21.3.0 direkt (samma version som redan används av Geolocation).
-- Tjänsten startas från synlig app, använder FusedLocationProviderClient med hög noggrannhet, preliminärt 2000/1000 ms, ingen avståndsgallring, ingen avsiktlig batchfördröjning och ingen gammal initial position. Intervallen garanterar inte exakt mättakt.
-- Native-koden håller högst 30 000 punkter i en synkroniserad minnesbuffert. Vid gränsen stoppas testet med ett meddelande; äldre punkter skrivs inte över. Alla punkter i inkommande batchar behandlas tills gränsen nås.
-- Varje punkt innehåller sessions-ID, löpnummer, koordinater, accuracy, speed (eller null), mättid, native mottagningstid samt monotona tider för analys utan påverkan av ändrad systemklocka. screenInteractive och deviceLocked avser mottagningstillfället, inte nödvändigtvis mättillfället vid fördröjd leverans.
-- API: startTracking, stopTracking, getTrackingState och readSamples. Återläsning sker i sidor om högst 500 punkter och tömmer inte bufferten. TypeScript använder löpnummer mot dubbletter och mättid för kartans ordning. Luckor fylls inte med syntetiska positioner.
-- UI uppdateras varannan sekund medan sidan är synlig samt vid återkomst. Timern styr enbart återläsningen, aldrig GPS-insamlingen. Teststatistiken visar punkter mottagna med släckt skärm respektive låst telefon, största lucka mellan mättider, väntan på första mätning och luckan vid slutet/nu.
-- Aviseringen erbjuder Stoppa. Testdata behålls efter stopp tills nästa test startas eller processen dör. Hela processens död, tvångsstopp eller omstart raderar bufferten. START_NOT_STICKY används; ingen automatisk återstart, disk-/SQLite-lagring, nätöverföring eller extra wake lock finns.
-- Kartbilder kräver fortfarande nät. Doze, tillverkarens batterioptimering, långvarigt stillastående och batteritid måste testas separat. Skärmsläckning är inte samma test som processdöd.
+- `TrackingDatabase.java`: Androids inbyggda SQLiteOpenHelper, databasversion 1, privat `tracking.db`, WAL och `synchronous=NORMAL`. Inga nya npm-/SQLite-bibliotek.
+- `tracking_session`: UUID, starttid och monoton starttid, eventuell stopptid, status (`recording`, `stopped`, `interrupted`, `error`), meddelande och senaste sparade löpnummer.
+- `tracking_sample`: identitet `(session_id, sequence)`, koordinater, accuracy, nullable speed, mättid, native mottagningstid, monotona mät-/mottagningstider och skärm-/låstillstånd. Foreign key med cascade-radering. Tider i UTC-millis; monotona tider jämförs endast inom samma registrering/uppstart.
+- En transaktion per mottagen GPS-leverans: samtliga punkter och löpnummer sparas tillsammans utan extra tidsbuffring. Endast färdigskrivna punkter redovisas som sparade. En leverans som fortfarande väntar i minnet eller inte har committats kan förloras vid processdöd.
+- GPS använder fortsatt FusedLocationProviderClient med hög noggrannhet och preliminärt 2000/1000 ms. Ingen ny GPS-filtrering, synkstatus eller nätöverföring.
+- Stoppa och aviseringsknappen stänger mottagningen och väntar på tidigare accepterade skrivningar och beständig slutstatus innan stoppet bekräftas. Fel i sparningen får inte ge beskedet ”Stoppat och sparat”.
+- Processägaren återställer kvarlämnad `recording` till `interrupted` vid första databasåtkomst i en ny process. WebView-omladdning och vanlig återöppning av databasen gör inte detta. Exakt sluttid efter processdöd är okänd; ingen slutlucka beräknas mot en ny uppstarts klocka. Ingen automatisk återstart av GPS.
+- Lista över sparade spår med starttid, status och antal punkter. Välj ett spår för att rita det. Starta nytt spår bevarar tidigare spår. Radera valt spår kräver uttrycklig bekräftelse och tillåts inte för pågående session.
+- Läsning sker i sidor om högst 500 punkter med en fast övre löpnummergräns per återläsning, så att nya GPS-punkter inte gör läsningen oändlig. Inga gränser på 30 000 punkter eller 65 sidor. Byte av spår avbryter en gammal återläsning. Hela det valda spåret finns fortfarande i WebViews minne för kartvisning; mycket stora spår behöver senare prestandaprov.
+- Inga automatiska raderingar. Full lagring/skrivfel stoppar registreringen med felbesked. Om även felstatusen inte kan sparas visas fel i den levande processen; efter processdöd kan sessionen då bara identifieras som avbruten.
+- Version 1 är första databasen; gamla minnesspår från tidigare appversion kan inte återskapas. Framtida versioner kräver uttryckliga migreringar. Ingen destruktiv fallback.
+- Databaskatalogen, inklusive WAL/journal-filer, undantas från Android-backup och enhetsöverföring via `backup_rules.xml` (äldre Android) och `data_extraction_rules.xml` (Android 12+). Appen har inga andra databaser nu. Ingen separat databaslösenordskryptering införs.
 
-### Testförfarande på telefon
+WAL/NORMAL skyddar färdiga transaktioner vid appens processdöd. Plötsligt strömavbrott/systemkrasch kan däremot förlora nyligen färdiga transaktioner. Avinstallation och ”Rensa lagring” raderar appens data. Säkerhetskopiering/export ingår inte. GPS fortsätter inte efter processdöd. Kartbilder kräver fortfarande nät; lokal registrering gör det inte.
 
-1. Bygg/synkronisera enligt ovan och installera via Android Studios Run på OnePlus. Tillåt exakt plats medan appen används och aviseringar.
-2. Utomhus: tryck Starta test, vänta på flera mätningar och god noggrannhet. Kontrollera aviseringen. Notera tid, batteriprocent och batterioptimeringsläge.
-3. Koppla ur USB, lås skärmen och gå 10–15 minuter med flera tydliga svängar, cirka 30–50 m mellan riktningsbyten. Tänd inte skärmen under promenaden.
-4. Öppna appen, vänta på återläsning och tryck Stoppa. Kontrollera att alla återlästa punkter visas, att många mottogs med släckt skärm/låst telefon och att mättiderna täcker promenaden.
-5. Kontrollera spårets verkliga svängar, största tidslucka och slutluckan. En rak linje mellan före/efter är inte ett godkänt resultat. Spara gärna en skärmbild innan nästa test, som ersätter spåret.
-6. Kontrollera att aviseringen försvinner och punkträknaren slutar öka efter stopp. Prova aviseringsknappen Stoppa i ett separat kort test.
+### Verifiering
+
+```powershell
+npm.cmd run typecheck
+node --test tests/tracking-model.test.mjs
+npm.cmd run build
+npx.cmd cap sync android
+# JDK 21 och Android SDK enligt verktygsavsnittet ovan
+.\android\gradlew.bat -p android --no-daemon assembleDebug :app:testDebugUnitTest :app:assembleDebugAndroidTest
+# Kräver ansluten telefon/emulator; uppdaterar APK:erna utan avinstallation
+$adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
+& $adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+& $adb install -r android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+& $adb shell am instrument -w se.jaktlaget.app.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Android-testerna använder separata slumpnamngivna testdatabaser och täcker schema/WAL/NORMAL, återöppning, rollback av en felaktig leverans, fler än 30 000 punkter/65 sidor, sessionsseparation, cascade-radering, processåterhämtning, skrivfel och stoppets skrivbarriär. De gamla JVM-testerna för minnesbufferten har ersatts. TypeScript-testerna täcker återläsning, dubbletter, mättidsordning, okänd slutlucka efter avbrott, sidvis läsning utan totalgräns och avbruten återläsning vid spårbyte. Simulerad processåterhämtning i tester ersätter inte provet med faktisk processdöd nedan.
+
+Verifierat 2026-09-26: TypeScript, Vite-build, Capacitor-sync och Android-debugbuild passerade. Sju TypeScript-tester och elva Android-tester på OnePlus 9 Pro/Android 14 passerade (tio lagringstester och mallens befintliga test). Webbversionen och Android-gränssnittet kontrollerades även med simulerade positioner/brygganrop. Manifest, paketerade backupundantag och diffkontroll är kontrollerade. Gradles tidigare icke blockerande varningar om flatDir och SDK XML kvarstår. Det verkliga promenadprovet med processdöd godkändes därefter 2026-09-27, se resultatet nedan.
+
+Gradles `connectedDebugAndroidTest` användes vid första verifieringen och tog bort appinstallationen efter testerna. Kör därför kommandona ovan när telefonen innehåller spår som ska bevaras. Testerna använder egna testdatabaser, men avinstallation av själva appen raderar även dess vanliga data.
+
+### Godkänt telefonprov av beständig lagring, 2026-09-27
+
+Projektägaren genomförde en kortare testpromenad på OnePlus 9 Pro. Skärmbilden visar mättider 06:47:26–06:49:24, 91 sparade punkter, 79 mottagna med släckt skärm, 81 med låst telefon, största mätlucka 2,9 s och slutnoggrannhet ±6 m. Räknarna för släckt och låst skärm överlappar.
+
+Efter stopp och sparning gav första `pidof` processnummer 549. Sista `pidof` efter `adb am kill` var tom, vilket bekräftade processdöden. Efter ny start fanns det tidigare spåret kvar och kunde öppnas. Ett andra spår kunde skapas utan att det första försvann; båda gick att välja och öppna. Projektägaren har godkänt lagrings-PoC:n.
+
+Gränssnittets rutinuppdatering bevarar nu befintliga listalternativ och statistikfält och ändrar bara innehåll som faktiskt ändrats. Laddningsmeddelandet visas inte vid varje rutinuppdatering. Rättningen mot blinkande spårlista är verifierad på telefonen. TypeScript, Vite-build, sju automatiska tester, simulerade webb-/Android-UI-tester, Capacitor-sync, Android-debugbuild och diffkontroll passerade efter rättningen. Android-bygget behövde köras med `--no-watch-fs` efter att Gradles filsystemsundersökning fastnat; ingen projektkonfiguration ändrades.
+
+Det korta provet verifierar sparning och återläsning efter stopp och processdöd, inte heldagsdrift eller abrupt processdöd mitt under en skrivning.
+
+### Telefonprov: spåra → spara → processdöd → återläs
+
+1. Installera debug-APK via Android Studios Run eller `adb install -r android/app/build/outputs/apk/debug/app-debug.apk`. Avinstallera inte den tidigare versionen och använd inte Rensa lagring.
+2. Tillåt exakt plats och aviseringar. Tryck Starta nytt spår utomhus. Lås skärmen och gå sicksack i 10–15 minuter.
+3. Öppna appen, tryck Stoppa och spara och invänta ”Stoppat och sparat”. Kontrollera att aviseringen försvunnit. Notera sessions-ID, sparat punktantal och mättider i GPS-teststatistik; ta gärna en skärmbild.
+4. Tryck Hem. Ingen debugger får vara ansluten och ingen spårning får pågå. Kör i PowerShell:
+
+```powershell
+$adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
+& $adb shell pidof se.jaktlaget.app
+& $adb shell am kill se.jaktlaget.app
+& $adb shell pidof se.jaktlaget.app
+```
+
+5. Första `pidof` ska ge ett processnummer, det andra ska vara tomt. Om processen finns kvar är processdöd inte verifierad; vänta kort i bakgrunden och kontrollera igen. Använd inte Force stop som ersättning. Om processen redan var borta före kommandot, öppna appen och upprepa efter Hem.
+6. Öppna JaktApp från ikonen utan att starta ny GPS. Välj samma spår i listan. Kontrollera samma sessions-ID, punktantal, mättider och verkliga riktningsförändringar på kartan.
+7. Starta och stoppa ett andra kort spår. Kontrollera att båda går att öppna separat. Prova därefter uttrycklig radering av det korta testspåret; det första ska finnas kvar.
+
+Att svepa bort en aktivitet eller använda ”Behåll inte aktiviteter” bevisar inte processdöd. `am kill` dödar endast processer Android bedömer kan avslutas och är därför avsett för detta prov efter stopp och Hem. Tvångsstopp ska inte kringgås. Ett separat utvecklartest av abrupt processdöd under aktiv skrivning behövs för ytterligare kraschverifiering; senaste ej färdiga transaktionen kan förloras, tidigare sparade punkter ska finnas kvar.
 
 ### Genomfört fälttest – godkänd PoC
 
-Projektägaren har genomfört och godkänt fälttestet på OnePlus 9 Pro. Resultaten nedan är rapporterade från telefonprovet:
+Projektägaren har genomfört och godkänt fälttestet av den tidigare minnesbaserade bakgrunds-GPS-PoC:n på OnePlus 9 Pro (commit 4eaf032). Detta test verifierar inte den nya SQLite-versionen. Resultaten nedan är rapporterade från telefonprovet:
 
 | Observation | Resultat |
 | --- | --- |
@@ -198,8 +247,4 @@ Räknarna för släckt skärm och låst telefon beskriver olika tillstånd vid m
 
 Batteriet gick från 21 % till 18 % (3 procentenheter). Telefonen är över fem år gammal och har ett kraftigt degraderat batteri; projektägaren behöver normalt powerbank vid jakt även utan hänsyn till JaktApp. Resultatet dokumenteras endast som en observation från detta test. Det ska inte användas för att uppskatta appens normala batteriförbrukning eller räknas om till förbrukning per timme/jaktdag, och motiverar ingen ändring av GPS-intervallet nu.
 
-Önskat intervall 2000 ms och minimiintervall 1000 ms behålls preliminärt. Slutliga intervall ska bestämmas senare genom fälttest av noggrannhet, spårkvalitet och batteriförbrukning. PoC:n är godkänd, men beständig lagring och övriga delar av etapp 2 återstår.
-
-### Datorverifiering av PoC
-
-Kör `npm.cmd run typecheck`, `npm.cmd run build`, `npx.cmd cap sync android` och därefter `android\gradlew.bat -p android --no-daemon assembleDebug :app:testDebugUnitTest` med JDK 21. Buffertens enhetstester omfattar trådsäkerhet, paginering, sessionsbyte, stopp och kapacitetsgräns. Kör `node --test tests/tracking-model.test.mjs` med Node 24 för återläsning, dubbletter, mättidsordning och luckstatistik. Simulerade webbläsar-/bryggtester ersätter inte sicksacktestet på telefon.
+Önskat intervall 2000 ms och minimiintervall 1000 ms behålls preliminärt. Slutliga intervall ska bestämmas senare genom fälttest av noggrannhet, spårkvalitet och batteriförbrukning. Bakgrunds-GPS-PoC:n är godkänd. Även lagrings-PoC:n är godkänd enligt det separata telefonprovet ovan.

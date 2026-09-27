@@ -20,7 +20,8 @@ if (Capacitor.getPlatform() === 'android') {
   status.tracking('Ingen testspårning startad');
   let shownSession: string | null = null;
   stopWatching = setupTrackingTest((points, state) => {
-    if (shownSession !== state.sessionId) {
+    const changedSession = shownSession !== state.sessionId;
+    if (changedSession) {
       map.clear(); currentPosition = null; shownSession = state.sessionId;
       status.reset();
     }
@@ -29,9 +30,9 @@ if (Capacitor.getPlatform() === 'android') {
       currentPosition = last;
       map.update(last, points.map(p => [p.latitude, p.longitude]));
       status.update(last, points.length, last.measuredAt);
+      if (changedSession && state.phase !== 'recording') map.fitTrack();
     }
-    const titles = { idle: 'Ingen testspårning startad', starting: 'Startar GPS-test...',
-      running: 'GPS-test pågår', stopping: 'Stoppar GPS-test...', stopped: 'GPS-test stoppat' };
+    const titles = { idle: 'Inga sparade spår', recording: 'GPS-spårning pågår', stopped: 'Stoppat och sparat', interrupted: 'Avbrutet spår', error: 'Spårning med fel' };
     status.tracking(titles[state.phase]);
   });
 } else {

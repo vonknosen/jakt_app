@@ -1,119 +1,109 @@
 package se.jaktlaget.app;
 
-import java.util.ArrayList;
+import android.content.Context;
+import android.os.SystemClock;
+import com.getcapacitor.JSObject;
 import java.util.List;
-import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-/** Process-local PoC state. No Activity, WebView, disk or network dependency. */
+/** One process-wide owner. All DB access and accepted writes run FIFO, independently of WebView. */
 public final class TrackingStore {
-    public static final TrackingStore INSTANCE = new TrackingStore(30_000);
-    public static final int PAGE_SIZE = 500;
-    private final int capacity;
-    private final List<Sample> samples = new ArrayList<>();
-    private String sessionId;
-    private String phase = "idle";
-    private String message = "Ingen testsession. Starta ett nytt test.";
-    private long startedAt, stoppedAt, startedElapsedMs, stoppedElapsedMs;
-
-    public TrackingStore(int capacity) { this.capacity = capacity; }
-
-    public synchronized String begin(long now, long elapsedMs) {
-        if (isActive()) throw new IllegalStateException("Spårning startar, pågår eller håller på att stoppas.");
-        sessionId = UUID.randomUUID().toString();
-        samples.clear();
-        phase = "starting";
-        message = "Startar GPS...";
-        startedAt = now;
-        startedElapsedMs = elapsedMs;
-        stoppedAt = stoppedElapsedMs = 0;
-        return sessionId;
+    private static TrackingStore instance;
+    public static synchronized TrackingStore get(Context context) {
+        if (instance == null) instance = new TrackingStore(context);
+        return instance;
     }
-
-    public synchronized boolean accepts(String id) {
-        return id != null && id.equals(sessionId) && (phase.equals("starting") || phase.equals("running"));
+    private final ExecutorService worker = Executors.newSingleThreadExecutor();
+    private final TrackingDatabase database;
+    private boolean initialized;
+    private volatile String activeId;
+    private volatile String failedId;
+    private volatile String failure;
+    private TrackingStore(Context context) { this(context, TrackingDatabase.NAME); }
+    TrackingStore(Context context, String databaseName) { database = new TrackingDatabase(context, databaseName); }
+    // Used by isolated Android tests; production owns the store for the process lifetime.
+    CompletableFuture<Void> closeForTest() {
+        CompletableFuture<Void> result = submit(() -> { database.close(); return null; });
+        worker.shutdown(); return result;
     }
+    public String activeId() { return activeId; }
+    public boolean accepts(String id) { return id != null && id.equals(activeId) && !id.equals(failedId); }
 
-    public synchronized boolean isActive() {
-        return phase.equals("starting") || phase.equals("running") || phase.equals("stopping");
+    private <T> CompletableFuture<T> submit(Callable<T> task) {
+        CompletableFuture<T> result = new CompletableFuture<>();
+        worker.execute(() -> {
+            try {
+                if (!initialized) { database.recoverInterrupted(); initialized = true; }
+                result.complete(task.call());
+            } catch (Exception error) { result.completeExceptionally(error); }
+        });
+        return result;
     }
-
-    public synchronized void running(String id) {
-        if (accepts(id)) { phase = "running"; message = "Spårning pågår"; }
+    public CompletableFuture<JSObject> begin() {
+        return submit(() -> {
+            if (activeId != null) throw new IllegalStateException("En spårning startar eller pågår redan.");
+            activeId = database.begin(System.currentTimeMillis(), SystemClock.elapsedRealtime());
+            return database.state(activeId);
+        });
     }
-
-    /** False means the caller must stop. The final accepted point is retained. */
-    public synchronized boolean append(String id, double latitude, double longitude, double accuracy,
-            Double speed, long measuredAt, long measuredElapsedMs, long receivedAt,
-            long receivedElapsedMs, boolean interactive, boolean locked) {
-        if (!accepts(id)) return false;
-        if (samples.size() < capacity) {
-            samples.add(new Sample(sessionId, samples.size() + 1, latitude, longitude, accuracy, speed,
-                measuredAt, measuredElapsedMs, receivedAt, receivedElapsedMs, interactive, locked));
+    public CompletableFuture<Void> append(String id, List<TrackingDatabase.Sample> points) {
+        return submit(() -> {
+            if (!accepts(id)) throw new IllegalStateException("Spårningen tar inte emot fler punkter.");
+            try { database.append(id, points); }
+            catch (RuntimeException error) {
+                failedId = id; failure = "Skrivfel. Alla mottagna punkter kunde inte sparas: " + error.getMessage();
+                try { database.finish(id, "error", failure, 0, 0); }
+                catch (RuntimeException secondary) { error.addSuppressed(secondary); }
+                throw error;
+            }
+            return null;
+        });
+    }
+    public CompletableFuture<JSObject> finish(String id, String status, String message, long now, long elapsed) {
+        return submit(() -> {
+            if (id == null) return database.state(null);
+            try {
+                if (id.equals(failedId)) { statusError(id); throw new IllegalStateException(failure); }
+                database.finish(id, status, message, now, elapsed);
+                return database.state(id);
+            } catch (RuntimeException error) {
+                failedId = id; failure = "Sparningen kunde inte slutföras: " + error.getMessage();
+                try { statusError(id); } catch (RuntimeException secondary) { error.addSuppressed(secondary); }
+                throw error;
+            } finally { if (id.equals(activeId)) activeId = null; }
+        });
+    }
+    private void statusError(String id) { database.finish(id, "error", failure, 0, 0); }
+    private JSObject overlay(JSObject state) {
+        if (failedId != null && failedId.equals(state.getString("sessionId"))) {
+            state.put("phase", "error"); state.put("message", failure);
         }
-        if (samples.size() >= capacity) {
-            phase = "stopping";
-            message = "Bufferten är full (" + capacity + " punkter). Testet stoppades; inga äldre punkter raderades.";
-            return false;
-        }
-        return true;
+        return state;
     }
-
-    public synchronized void requestStop(String id, String reason) {
-        if (id != null && id.equals(sessionId) && isActive()) {
-            phase = "stopping";
-            message = reason;
-        }
+    public CompletableFuture<JSObject> state() { return submit(() -> overlay(database.state(activeId))); }
+    public CompletableFuture<JSObject> sessions() {
+        return submit(() -> {
+            JSObject result = new JSObject(); result.put("sessions", database.sessions());
+            result.put("activeSessionId", activeId == null ? org.json.JSONObject.NULL : activeId);
+            result.put("storageError", failure == null ? org.json.JSONObject.NULL : failure);
+            return result;
+        });
     }
-
-    public synchronized void finish(String id, long now, long elapsedMs) {
-        if (id != null && id.equals(sessionId) && isActive()) {
-            if (!phase.equals("stopping")) message = "Tjänsten avslutades. Testdata finns kvar så länge processen lever.";
-            phase = "stopped";
-            stoppedAt = now;
-            stoppedElapsedMs = elapsedMs;
-        }
+    public CompletableFuture<JSObject> read(String id, long after, Long through) {
+        return submit(() -> {
+            JSObject page = database.read(id, after, through);
+            page.put("state", overlay(page.getJSObject("state")));
+            return page;
+        });
     }
-
-    /** Atomic page + state, non-destructive. A new session resets the reader cursor. */
-    public synchronized Snapshot read(String readerSession, int afterSequence) {
-        int from = sessionId != null && sessionId.equals(readerSession)
-            ? Math.min(Math.max(afterSequence, 0), samples.size()) : 0;
-        int to = Math.min(samples.size(), from + PAGE_SIZE);
-        return new Snapshot(sessionId, phase, message, startedAt, stoppedAt, startedElapsedMs,
-            stoppedElapsedMs, capacity, samples.size(), to, to < samples.size(),
-            new ArrayList<>(samples.subList(from, to)));
-    }
-
-    public static final class Sample {
-        public final String sessionId;
-        public final int sequence;
-        public final double latitude, longitude, accuracy;
-        public final Double speed;
-        public final long measuredAt, measuredElapsedMs, receivedAt, receivedElapsedMs;
-        public final boolean screenInteractive, deviceLocked;
-        Sample(String id, int seq, double lat, double lon, double accuracy, Double speed,
-                long measured, long measuredElapsed, long received, long receivedElapsed,
-                boolean interactive, boolean locked) {
-            this.sessionId = id; this.sequence = seq; this.latitude = lat; this.longitude = lon;
-            this.accuracy = accuracy; this.speed = speed; this.measuredAt = measured;
-            this.measuredElapsedMs = measuredElapsed; this.receivedAt = received;
-            this.receivedElapsedMs = receivedElapsed; this.screenInteractive = interactive;
-            this.deviceLocked = locked;
-        }
-    }
-
-    public static final class Snapshot {
-        public final String sessionId, phase, message;
-        public final long startedAt, stoppedAt, startedElapsedMs, stoppedElapsedMs;
-        public final int capacity, count, nextSequence;
-        public final boolean hasMore;
-        public final List<Sample> samples;
-        Snapshot(String id, String phase, String message, long start, long stop, long startElapsed,
-                long stopElapsed, int capacity, int count, int next, boolean more, List<Sample> samples) {
-            this.sessionId = id; this.phase = phase; this.message = message;
-            this.startedAt = start; this.stoppedAt = stop; this.startedElapsedMs = startElapsed;
-            this.stoppedElapsedMs = stopElapsed; this.capacity = capacity; this.count = count;
-            this.nextSequence = next; this.hasMore = more; this.samples = samples;
-        }
+    public CompletableFuture<JSObject> delete(String id) {
+        return submit(() -> {
+            if (id == null || id.equals(activeId)) throw new IllegalArgumentException("Pågående eller ospecificerat spår får inte raderas.");
+            database.delete(id);
+            return new JSObject();
+        });
     }
 }

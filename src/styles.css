@@ -96,3 +96,6 @@ html, body {
 #tracking-error { color: #a00000; }
 #tracking-test summary { cursor: pointer; padding: 6px 0; }
 #tracking-test small { display: block; margin-top: 6px; }
+
+#tracking-sessions { display: block; width: 100%; min-height: 44px; margin: 4px 0; }
+#tracking-delete { min-height: 44px; margin-bottom: 6px; }

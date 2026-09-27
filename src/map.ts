@@ -61,6 +61,9 @@ export function createMap() {
     center(position: LocationSample) {
       map.setView([position.latitude, position.longitude], POSITION_ZOOM);
     },
+    fitTrack() {
+      if (trackLine) map.fitBounds(trackLine.getBounds(), { padding: [30, 30], maxZoom: POSITION_ZOOM });
+    },
     clear() {
       marker?.remove(); accuracyCircle?.remove(); trackLine?.remove();
       marker = null; accuracyCircle = null; trackLine = null; firstPosition = true;
